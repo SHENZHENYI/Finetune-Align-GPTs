@@ -14,7 +14,7 @@ def save_model_checkpoint(fabric, model, file_path):
     """
 
     if isinstance(fabric.strategy, FSDPStrategy):
-        save_policy = FullStateDictConfig(offload_to_cpu=True, rank0_only=True)
+        save_policy = FullStateDictConfig(offload_to_cpu=False, rank0_only=True)
         with FSDP.state_dict_type(model, StateDictType.FULL_STATE_DICT, save_policy):
             state_dict = model._forward_module.state_dict()
     else:

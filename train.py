@@ -16,13 +16,13 @@ from lit_llama.utils import save_model_checkpoint
 
 debug=True
 accelerator='cpu'
-n_devices = 4
-precision="bf16-mixed"
+n_devices = 1
+precision="16-mixed"
 
 out_dir = "out/training"
-eval_interval = 200#2000
-eval_iters = 5#200
-log_interval = 1
+eval_interval = 2000
+eval_iters = 200
+log_interval = 5
 # compilation fails as it does not support torch.complex64 for RoPE
 # compile = False
 
@@ -137,7 +137,8 @@ def get_batch(fabric: L.Fabric, data: np.ndarray, block_size: int) -> Tuple[torc
     y = torch.stack([
         torch.from_numpy((data[i + 1 : i + 1 + block_size]).astype(np.int64)) for i in ix
     ])
-    #x, y = fabric.to_device((x.pin_memory(), y.pin_memory()))
+    if not debug:
+        x, y = fabric.to_device((x.pin_memory(), y.pin_memory()))
     return x, y
 
 
