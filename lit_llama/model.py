@@ -81,7 +81,7 @@ class LLaMAConfig:
 
 
 llama_configs = {
-    "test": LLaMAConfig(n_layer=4, n_head=8, n_embd=512, vocab_size=100, block_size=1024),
+    "test": LLaMAConfig(n_layer=4, n_head=8, n_embd=512, block_size=1024),
     "7B": LLaMAConfig(n_layer=32, n_head=32, n_embd=4096),
     "13B": LLaMAConfig(n_layer=40, n_head=40, n_embd=5120),
     "30B": LLaMAConfig(n_layer=60, n_head=52, n_embd=6656),

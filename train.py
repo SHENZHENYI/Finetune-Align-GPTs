@@ -38,6 +38,8 @@ grad_clip = 1.0
 # For shakespeare, choose smaller block size than vanilla LLaMA
 block_size = 1024
 
+max_iters = int(max_iters/batch_size)
+
 def main() -> None:
     if not debug:
         auto_wrap_policy = partial(transformer_auto_wrap_policy, transformer_layer_cls={Block})

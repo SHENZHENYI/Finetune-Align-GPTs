@@ -1,5 +1,6 @@
 torch>=2.0.0
 tqdm>=4.57.0
+starlette==0.22.0
 typing-extensions>=4.0.0
 lightning>=2.0.0
 sentencepiece
