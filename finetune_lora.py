@@ -132,8 +132,8 @@ def generate_response(model, instruction):
 
     output = generate(
         model,
-        idx=encoded,
-        max_seq_length=block_size,
+        tokens=encoded,
+        max_length=block_size,
         max_new_tokens=100,
     )
     output = tokenizer.decode(output[0].cpu())
@@ -186,7 +186,6 @@ def get_batch(fabric: L.Fabric, data: list):
     if not debug:
         x, y = fabric.to_device((x.pin_memory(), y.pin_memory()))
 
-    print('xy', x.shape, y.shape)
     return x, y
 
 
