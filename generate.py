@@ -10,9 +10,11 @@ from lit_llama import LLaMA, Tokenizer
 
 """paths and parameters"""
 prompt = "here is "
-accelerator = 'cpu'
-tokenizer_path = "data/shakespeare/tokenizer.model"#"/Users/zhenyishen/Downloads/LLaMA/tokenizer.model"
-model_path = "out/training/latest-iter-ckpt.pt"
+llama_name = "7B"
+accelerator = 'cuda'
+n_devices=2
+tokenizer_path = "../tokenizer.model"#"/Users/zhenyishen/Downloads/LLaMA/tokenizer.model"
+model_path = "../state_dict.pth"
 
 tokenizer_path = Path(tokenizer_path)
 model_path = Path(model_path)
@@ -54,11 +56,11 @@ def main():
     assert tokenizer_path.is_file()
     assert model_path.is_file()
 
-    fabric = L.Fabric(accelerator=accelerator)
+    fabric = L.Fabric(accelerator=accelerator, devices=n_devices)
 
     print("Loading the checkpoint ...")
     t0 = time.time()
-    model = LLaMA.from_name("test")
+    model = LLaMA.from_name(llama_name)
     checkpoint = torch.load(model_path)
     model.load_state_dict(checkpoint)
     t1 = time.time()-t0

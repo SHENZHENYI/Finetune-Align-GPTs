@@ -10,6 +10,27 @@ import torch.nn as nn
 from torch.nn import functional as F
 #from typing_extensions import Self
 
+@dataclass
+class LLaMAConfig:
+    block_size: int = 4096
+    vocab_size: int = 32000
+    n_layer: int = 32
+    n_head: int = 32
+    n_embd: int = 4096
+
+    @classmethod
+    def from_name(cls, name: str):
+        return llama_configs[name]
+
+
+llama_configs = {
+    "test": LLaMAConfig(n_layer=4, n_head=8, n_embd=512, block_size=1024),
+    "7B": LLaMAConfig(n_layer=32, n_head=32, n_embd=4096),
+    "13B": LLaMAConfig(n_layer=40, n_head=40, n_embd=5120),
+    "30B": LLaMAConfig(n_layer=60, n_head=52, n_embd=6656),
+    "65B": LLaMAConfig(n_layer=80, n_head=64, n_embd=8192),
+}
+
 
 def build_rope_cache(seq_len: int, n_elem: int, dtype: torch.dtype, device: torch.device, base: int = 10000) -> torch.Tensor:
     """Enhanced Transformer with Rotary Position Embedding.
@@ -26,8 +47,19 @@ def build_rope_cache(seq_len: int, n_elem: int, dtype: torch.dtype, device: torc
     # Calculate the product of position index and $\theta_i$
     idx_theta = torch.outer(seq_idx, theta)
 
-    # Cache them
-    cache = torch.polar(torch.ones_like(idx_theta), idx_theta)  # complex64
+    # Compute cache. Because polar only takes float32 or float64, we need to cast
+    # when working with 16 bit floats (float16 or bfloat16)
+    working_dtype = (
+        torch.float32 if (dtype == torch.float16 or dtype == torch.bfloat16) else dtype
+    )
+    complex_dtype = (
+        torch.complex32
+        if (dtype == torch.float16 or dtype == torch.bfloat16)
+        else torch.complex64
+    )
+    cache = torch.polar(
+        torch.ones_like(idx_theta).to(working_dtype), idx_theta.to(working_dtype)
+    ).to(complex_dtype)
     return cache
 
 
@@ -65,28 +97,6 @@ class RMSNorm(nn.Module):
         norm_x = torch.mean(x * x, dim=self.dim, keepdim=True)
         x_normed = x * torch.rsqrt(norm_x + self.eps)
         return self.scale * x_normed
-
-
-@dataclass
-class LLaMAConfig:
-    block_size: int = 4096
-    vocab_size: int = 32000
-    n_layer: int = 32
-    n_head: int = 32
-    n_embd: int = 4096
-
-    @classmethod
-    def from_name(cls, name: str):
-        return llama_configs[name]
-
-
-llama_configs = {
-    "test": LLaMAConfig(n_layer=4, n_head=8, n_embd=512, block_size=1024),
-    "7B": LLaMAConfig(n_layer=32, n_head=32, n_embd=4096),
-    "13B": LLaMAConfig(n_layer=40, n_head=40, n_embd=5120),
-    "30B": LLaMAConfig(n_layer=60, n_head=52, n_embd=6656),
-    "65B": LLaMAConfig(n_layer=80, n_head=64, n_embd=8192),
-}
 
 
 class CausalSelfAttention(nn.Module):

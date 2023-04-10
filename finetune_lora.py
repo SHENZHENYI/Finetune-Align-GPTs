@@ -13,14 +13,15 @@ import torch
 from generate import generate
 from lit_llama.lora import mark_only_lora_as_trainable, lora, lora_state_dict
 from lit_llama.model import LLaMA, LLaMAConfig
-#from lit_llama.utils import EmptyInitOnDevice
+from lit_llama.utils import EmptyInitOnDevice
 from lit_llama.tokenizer import Tokenizer
 from scripts.prepare_alpaca import generate_prompt
 
-debug = True
-llama_name = "test"
-load_from_the_pretrained = False
-tokenizer_path = "/Users/zhenyishen/Downloads/LLAMA-tokenizer/tokenizer.model"
+debug = False
+llama_name = "7B"
+load_from_the_pretrained = True
+model_path = "../state_dict.pth"
+tokenizer_path = "../tokenizer.model"
 
 out_dir = "out/alpaca-lora"
 eval_interval = 20
@@ -57,11 +58,12 @@ def main():
     config = LLaMAConfig.from_name(llama_name)
     config.block_size = block_size
 
-    with lora(r=lora_r, alpha=lora_alpha, dropout=lora_dropout, enabled=True):
-        model = LLaMA(config)
+    with EmptyInitOnDevice(device=fabric.device, dtype=torch.float16):
+        with lora(r=lora_r, alpha=lora_alpha, dropout=lora_dropout, enabled=True):
+            model = LLaMA(config)
 
     if load_from_the_pretrained:
-        checkpoint = torch.load("checkpoints/lit-llama/7B/state_dict.pth")
+        checkpoint = torch.load(model_path)
         
         # strict=False because missing keys due to LoRA weights not contained in checkpoint state
         model.load_state_dict(checkpoint, strict=False) 
