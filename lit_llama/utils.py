@@ -5,7 +5,7 @@ import functools
 from lightning.fabric.strategies import FSDPStrategy
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.distributed.fsdp import StateDictType, FullStateDictConfig
-import torch.utils._device
+#import torch.utils._device
 
 
 def save_model_checkpoint(fabric, model, file_path):

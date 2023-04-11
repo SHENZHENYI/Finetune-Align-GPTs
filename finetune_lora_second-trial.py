@@ -17,12 +17,9 @@ from lit_llama.utils import EmptyInitOnDevice
 from lit_llama.tokenizer import Tokenizer
 from scripts.prepare_alpaca import generate_prompt
 
-debug = True
-llama_name = "test"
-load_from_the_pretrained = False
-model_path = "../state_dict.pth"
-#tokenizer_path = "../tokenizer.model"
-tokenizer_path = "/Users/zhenyishen/Downloads/LLaMA/tokenizer.model"
+llama_name = "7B"
+checkpoint_path = "../state_dict.pth"
+tokenizer_path = "../tokenizer.model"
 
 out_dir = "out/alpaca-lora"
 eval_interval = 20
@@ -33,7 +30,7 @@ log_interval = 1
 # Hyperparameters
 learning_rate = 3e-4
 batch_size = 128
-micro_batch_size = 6
+micro_batch_size = 4
 gradient_accumulation_steps = batch_size // micro_batch_size
 max_iters = 50000 * 3 // micro_batch_size
 weight_decay = 0.0
@@ -43,11 +40,9 @@ lora_alpha = 16
 lora_dropout = 0.05
 warmup_steps = 100
 
+
 def main():
-    if not debug:
-        fabric = L.Fabric(accelerator="cuda", devices=2, precision="bf16-mixed", strategy='ddp')
-    else:
-        fabric = L.Fabric(accelerator="cpu",)
+    fabric = L.Fabric(accelerator="cuda", devices=1, precision="bf16-mixed")
     fabric.launch()
     fabric.seed_everything(1337 + fabric.global_rank)
 
@@ -59,20 +54,15 @@ def main():
     config = LLaMAConfig.from_name(llama_name)
     config.block_size = block_size
 
-    if not debug:
-        with EmptyInitOnDevice(device=fabric.device, dtype=torch.bfloat16):
-            with lora(r=lora_r, alpha=lora_alpha, dropout=lora_dropout, enabled=True):
-                model = LLaMA(config)
-    else:
-        with lora(r=lora_r, alpha=lora_alpha, dropout=lora_dropout, enabled=True):
-            model = LLaMA(config)
+    checkpoint = torch.load(checkpoint_path)
 
-    if load_from_the_pretrained:
-        checkpoint = torch.load(model_path)
-        
+    with fabric.device, lora(r=lora_r, alpha=lora_alpha, dropout=lora_dropout, enabled=True):
+        torch.set_default_tensor_type(torch.HalfTensor)
+        model = LLaMA(config).bfloat16()
+        torch.set_default_tensor_type(torch.FloatTensor)
         # strict=False because missing keys due to LoRA weights not contained in checkpoint state
         model.load_state_dict(checkpoint, strict=False) 
-
+    
     mark_only_lora_as_trainable(model)
 
     optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate)
@@ -93,6 +83,7 @@ def train(
     step_count = 0
 
     for iter_num in range(max_iters):
+
         if step_count <= warmup_steps:
             # linear warmup
             lr = learning_rate * step_count / warmup_steps
@@ -102,14 +93,11 @@ def train(
         t0 = time.time()
 
         input_ids, targets = get_batch(fabric, train_data)
-        #print(input_ids.shape, targets.shape)
-
         logits = model(input_ids)
-        #print('logits', logits.shape, targets.shape)
-        loss = torch.nn.functional.cross_entropy(logits.contiguous().view(-1, logits.size(-1)), targets.contiguous().view(-1).contiguous(), ignore_index=-1)
+        loss = loss_fn(logits, targets)
         fabric.backward(loss)
 
-        #fabric.clip_gradients(model, optimizer, clip_val=1.0)
+        fabric.clip_gradients(model, optimizer, clip_val=1.0)
 
         if (iter_num + 1) % gradient_accumulation_steps == 0:
             optimizer.step()
@@ -132,6 +120,7 @@ def train(
         if iter_num % log_interval == 0:
             fabric.print(f"iter {iter_num}: loss {loss.item():.4f}, time: {dt*1000:.2f}ms")
 
+
 def generate_response(model, instruction):
     tokenizer = Tokenizer(tokenizer_path)
     sample = {"instruction": instruction, "input": ""}
@@ -142,12 +131,13 @@ def generate_response(model, instruction):
 
     output = generate(
         model,
-        tokens=encoded,
-        max_length=block_size,
+        idx=encoded,
+        max_seq_length=block_size,
         max_new_tokens=100,
     )
     output = tokenizer.decode(output[0].cpu())
     return output # output.split("### Response:")[1].strip()
+
 
 @torch.no_grad()
 def validate(fabric: L.Fabric, model: torch.nn.Module, val_data: np.ndarray) -> torch.Tensor:
@@ -157,7 +147,7 @@ def validate(fabric: L.Fabric, model: torch.nn.Module, val_data: np.ndarray) -> 
     for k in range(eval_iters):
         input_ids, targets = get_batch(fabric, val_data)
         logits = model(input_ids)
-        loss = torch.nn.functional.cross_entropy(logits.view(-1, logits.size(-1)), targets.view(-1), ignore_index=-1)
+        loss = loss_fn(logits, targets)
         losses[k] = loss.item()
     out = losses.mean()
 
@@ -171,32 +161,30 @@ def validate(fabric: L.Fabric, model: torch.nn.Module, val_data: np.ndarray) -> 
     model.train()
     return out.item()
 
+def loss_fn(logits, targets):
+    # shift the targets such that output n predicts token n+1
+    logits = logits[..., :-1, :].contiguous()
+    targets = targets[..., 1:].contiguous()
+    loss = torch.nn.functional.cross_entropy(logits.view(-1, logits.size(-1)), targets.view(-1), ignore_index=-1)
+    return loss
+    
+
 def get_batch(fabric: L.Fabric, data: list):
-    ix = torch.randint(len(data), (micro_batch_size, ))
-    #print('ix', ix, len(data))
+    ix = torch.randint(len(data), (micro_batch_size,))
+
     input_ids = [torch.tensor(data[i]["input_ids"], dtype=torch.int64) for i in ix]
     labels = [torch.tensor(data[i]["labels"], dtype=torch.int64) for i in ix]
 
     max_len = max(len(s) for s in input_ids)
 
     def pad_left(x, pad_id):
-        n = max_len-len(x)
-        return torch.cat((
-            torch.full((n,), pad_id, dtype=x.dtype),
-            x
-        ))
-    
-    x = torch.stack([pad_left(xx, pad_id=0) for xx in input_ids])
-    y = torch.stack([pad_left(yy, pad_id=-1) for yy in labels])
+        # pad left based on the longest sequence
+        n = max_len - len(x)
+        return torch.cat((torch.full((n,), pad_id, dtype=x.dtype), x))
 
-    # shift the input and the targets
-    x = x[:, :-1]
-    y = y[:, 1:]
-
-
-    if not debug:
-        x, y = fabric.to_device((x.pin_memory(), y.pin_memory()))
-
+    x = torch.stack([pad_left(x, pad_id=0) for x in input_ids])
+    y = torch.stack([pad_left(x, pad_id=-1) for x in labels])
+    x, y = fabric.to_device((x.pin_memory(), y.pin_memory()))
     return x, y
 
 
@@ -204,6 +192,7 @@ def load_datasets(data_dir: str = "data/alpaca"):
     train_data = torch.load(os.path.join(data_dir, "train.pt"))
     val_data = torch.load(os.path.join(data_dir, "test.pt"))
     return train_data, val_data
+
 
 if __name__ == "__main__":
     torch.set_float32_matmul_precision("high")

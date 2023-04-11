@@ -17,12 +17,11 @@ from lit_llama.utils import EmptyInitOnDevice
 from lit_llama.tokenizer import Tokenizer
 from scripts.prepare_alpaca import generate_prompt
 
-debug = True
-llama_name = "test"
-load_from_the_pretrained = False
+debug = False
+llama_name = "7B"
+load_from_the_pretrained = True
 model_path = "../state_dict.pth"
-#tokenizer_path = "../tokenizer.model"
-tokenizer_path = "/Users/zhenyishen/Downloads/LLaMA/tokenizer.model"
+tokenizer_path = "../tokenizer.model"
 
 out_dir = "out/alpaca-lora"
 eval_interval = 20
@@ -59,11 +58,7 @@ def main():
     config = LLaMAConfig.from_name(llama_name)
     config.block_size = block_size
 
-    if not debug:
-        with EmptyInitOnDevice(device=fabric.device, dtype=torch.bfloat16):
-            with lora(r=lora_r, alpha=lora_alpha, dropout=lora_dropout, enabled=True):
-                model = LLaMA(config)
-    else:
+    with EmptyInitOnDevice(device=fabric.device, dtype=torch.bfloat16):
         with lora(r=lora_r, alpha=lora_alpha, dropout=lora_dropout, enabled=True):
             model = LLaMA(config)
 
@@ -102,11 +97,8 @@ def train(
         t0 = time.time()
 
         input_ids, targets = get_batch(fabric, train_data)
-        #print(input_ids.shape, targets.shape)
-
         logits = model(input_ids)
-        #print('logits', logits.shape, targets.shape)
-        loss = torch.nn.functional.cross_entropy(logits.contiguous().view(-1, logits.size(-1)), targets.contiguous().view(-1).contiguous(), ignore_index=-1)
+        loss = torch.nn.functional.cross_entropy(logits.view(-1, logits.size(-1)), targets.view(-1), ignore_index=-1)
         fabric.backward(loss)
 
         #fabric.clip_gradients(model, optimizer, clip_val=1.0)
@@ -173,7 +165,7 @@ def validate(fabric: L.Fabric, model: torch.nn.Module, val_data: np.ndarray) -> 
 
 def get_batch(fabric: L.Fabric, data: list):
     ix = torch.randint(len(data), (micro_batch_size, ))
-    #print('ix', ix, len(data))
+
     input_ids = [torch.tensor(data[i]["input_ids"], dtype=torch.int64) for i in ix]
     labels = [torch.tensor(data[i]["labels"], dtype=torch.int64) for i in ix]
 
@@ -192,7 +184,6 @@ def get_batch(fabric: L.Fabric, data: list):
     # shift the input and the targets
     x = x[:, :-1]
     y = y[:, 1:]
-
 
     if not debug:
         x, y = fabric.to_device((x.pin_memory(), y.pin_memory()))
