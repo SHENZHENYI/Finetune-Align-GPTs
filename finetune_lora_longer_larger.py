@@ -1,4 +1,7 @@
 """
+more lora ranks, and larger max_len
+"""
+"""
 Instruction-tuning with LoRA on the Alpaca dataset.
 Note: If you run into a CUDA error "Expected is_sm80 to be true, but got false", install
 the PyTorch nightly version for a fix (see https://github.com/Lightning-AI/lit-llama/issues/101).
@@ -21,7 +24,7 @@ llama_name = "7B"
 checkpoint_path = "../state_dict.pth"
 tokenizer_path = "../tokenizer.model"
 
-out_dir = "out/alpaca-lora-v2"
+out_dir = "out/alpaca-lora-512"
 eval_interval = 20
 save_interval = 20
 eval_iters = 100
@@ -30,12 +33,12 @@ log_interval = 1
 # Hyperparameters
 learning_rate = 3e-4
 batch_size = 128
-micro_batch_size = 4
+micro_batch_size = 2
 gradient_accumulation_steps = batch_size // micro_batch_size
 max_iters = 50000 * 3 // micro_batch_size
 weight_decay = 0.0
-block_size = 256
-lora_r = 8
+block_size = 512
+lora_r = 16
 lora_alpha = 16
 lora_dropout = 0.05
 warmup_steps = 100
@@ -118,7 +121,7 @@ def train(
 
         dt = time.time() - t0
         if iter_num % log_interval == 0:
-            fabric.print(f"iter {iter_num}: loss {loss.item():.4f}, time: {dt*1000:.2f}ms")
+            fabric.print(f"iter {iter_num}: loss {loss.item():.4f}, time: {dt*1000:.2f}ms, max-iter: {max_iters}")
 
 
 def generate_response(model, instruction):
@@ -133,7 +136,7 @@ def generate_response(model, instruction):
         model,
         tokens=encoded,
         max_length=block_size,
-        max_new_tokens=128,
+        max_new_tokens=100,
     )
     output = tokenizer.decode(output[0].cpu())
     return output # output.split("### Response:")[1].strip()
@@ -188,7 +191,7 @@ def get_batch(fabric: L.Fabric, data: list):
     return x, y
 
 
-def load_datasets(data_dir: str = "data/alpaca"):
+def load_datasets(data_dir: str = "data/alpaca-512"):
     train_data = torch.load(os.path.join(data_dir, "train.pt"))
     val_data = torch.load(os.path.join(data_dir, "test.pt"))
     return train_data, val_data

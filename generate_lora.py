@@ -6,19 +6,31 @@ from torch import nn
 from dataclasses import dataclass
 
 import lightning as L
+from lit_llama.lora import mark_only_lora_as_trainable, lora, lora_state_dict
 from lit_llama import LLaMA, Tokenizer
 from lit_llama.utils import EmptyInitOnDevice
 from lit_llama.model import LLaMA, LLaMAConfig
 
 
 """paths and parameters"""
-prompt = "here is "
+prompt = """Below is an instruction that describes a task. Write a response that appropriately completes the request.
+
+### Instruction:
+Tell me about the president of Mexico in 2019.
+
+### Response:"""
+use_lora = True
 llama_name = "7B"
 accelerator = 'cuda'
 n_devices=1
 tokenizer_path = "../tokenizer.model"#"/Users/zhenyishen/Downloads/LLaMA/tokenizer.model"
 model_path = "../state_dict.pth"
-block_size=256
+lora_path = "out/alpaca-lora-512/iter-074239-ckpt.pt"
+block_size=512
+lora_r = 16
+lora_alpha = 16
+lora_dropout = 0.05
+
 
 tokenizer_path = Path(tokenizer_path)
 model_path = Path(model_path)
@@ -29,13 +41,16 @@ def generate(
     max_new_tokens: int = 128,
     max_length: int = 256,
     temperature: float = 1.0,
-    top_k: int = 200
+    top_k: int = 200,
+    stop_token: int = 2
 ):
     B, T = tokens.size()
     T_new = T + max_new_tokens
     tmp = torch.empty(B, T_new, dtype=tokens.dtype, device=tokens.device)
+    stop_len = T_new
     tmp[:, :T] = tokens
     tokens = tmp  
+    print('stop_len', stop_len, 'T_new', T_new)
 
     for t in range(T, T_new):
         tokens_conditional = tokens[:, :t]
@@ -54,7 +69,12 @@ def generate(
 
         tokens[:, [t]] = next_token
 
-    return tokens
+        if next_token.item() == stop_token:
+            stop_len = t+1
+            break
+            
+
+    return tokens[:, :stop_len]
 
 def main():
     assert tokenizer_path.is_file()
@@ -72,16 +92,27 @@ def main():
     config = LLaMAConfig.from_name(llama_name)
     config.block_size = block_size
     checkpoint = torch.load(model_path)
-    with fabric.device:
-        t0 = time.time()
-        torch.set_default_tensor_type(torch.HalfTensor)
-        model = LLaMA(config).bfloat16()
-        torch.set_default_tensor_type(torch.FloatTensor)
-        # strict=False because missing keys due to LoRA weights not contained in checkpoint state
-        model.load_state_dict(checkpoint, strict=False) 
-        t1 = time.time()-t0
-        print(f"Loaded the checkpoint: {t1:.4f}s")
+    
+    if use_lora:
+        print('lora')
+        lora_checkpoint = torch.load(lora_path)
+        with fabric.device, lora(r=lora_r, alpha=lora_alpha, dropout=lora_dropout, enabled=True):
+            torch.set_default_tensor_type(torch.HalfTensor)
+            model = LLaMA(config).bfloat16()
+            torch.set_default_tensor_type(torch.FloatTensor)
+            # strict=False because missing keys due to LoRA weights not contained in checkpoint state
+            model.load_state_dict(checkpoint, strict=False) 
+            model.load_state_dict(lora_checkpoint, strict=False) 
 
+    else:
+        print('no lora')
+        with fabric.device:
+            torch.set_default_tensor_type(torch.HalfTensor)
+            model = LLaMA(config).bfloat16()
+            torch.set_default_tensor_type(torch.FloatTensor)
+            # strict=False because missing keys due to LoRA weights not contained in checkpoint state
+            model.load_state_dict(checkpoint, strict=False) 
+        
     model.eval()
     model = fabric.setup_module(model)
 
@@ -92,7 +123,9 @@ def main():
     
     L.seed_everything(1234)
 
-    tokens = generate(model, encoded_prompt)[0]
+    tokens = generate(model, encoded_prompt, stop_token=tokenizer.eos_id, max_new_tokens=block_size, max_length= block_size,)[0]
+    print(tokens)
+    print(tokens.shape)
     out = tokenizer.decode(tokens)
     print(out)
 
