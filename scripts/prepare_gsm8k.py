@@ -30,7 +30,7 @@ def get_examples(data_dir, split):
 def prepare(
     destination_path: Path = Path("data/GSM8K"), 
     tokenizer_path: Path = Path("/Users/zhenyishen/Downloads/LLAMA-tokenizer/tokenizer.model"),
-    max_seq_length: int = 512,
+    max_seq_length: int = 1024,
     seed: int = 42,
     mask_inputs: bool = False,  # as in alpaca-lora
 ) -> None:
@@ -54,13 +54,13 @@ def prepare(
     train_set = [x for x in train_set if x is not None]
 
     test_set = [prepare_sample(sample, tokenizer, max_seq_length, mask_inputs) for sample in tqdm(test_data)]
-    test_set = [x for x in test_data if x is not None]
+    test_set = [x for x in test_set if x is not None]
 
     print(f"training data has {len(train_set)} samples")
     print(f"test data has {len(test_set)} samples")
 
     torch.save(train_set, destination_path / "train.pt")
-    torch.save(test_set, destination_path / "train.pt")
+    torch.save(test_set, destination_path / "test.pt")
 
 
 def prepare_sample(example: dict, tokenizer: Tokenizer, max_length: int, mask_inputs: bool = True):
@@ -91,8 +91,8 @@ def prepare_sample(example: dict, tokenizer: Tokenizer, max_length: int, mask_in
     if mask_inputs:
         labels[:len(encoded_full_prompt)] = IGNORE_INDEX
 
-    print("full_prompt_and_response", full_prompt_and_response)
-    print("encoded_full_prompt_and_response", encoded_full_prompt_and_response.shape)
+    ##print("full_prompt_and_response", full_prompt_and_response)
+    #print("encoded_full_prompt_and_response", encoded_full_prompt_and_response.shape)
     return {**example, "input_ids": encoded_full_prompt_and_response, "labels": labels}
 
 

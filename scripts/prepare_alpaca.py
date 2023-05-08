@@ -23,7 +23,7 @@ def prepare(
     destination_path: Path = Path("data/alpaca"), 
     tokenizer_path: Path = Path("/Users/zhenyishen/Downloads/LLAMA-tokenizer/tokenizer.model"),
     test_split_size: int = 2000,
-    max_seq_length: int = 256,
+    max_seq_length: int = 1024,
     seed: int = 42,
     mask_inputs: bool = False,  # as in alpaca-lora
 ) -> None:
@@ -97,7 +97,7 @@ def prepare_sample(example: dict, tokenizer: Tokenizer, max_length: int, mask_in
     if mask_inputs:
         labels[:len(encoded_full_prompt)] = IGNORE_INDEX
 
-    print({**example, "input_ids": encoded_full_prompt_and_response, "labels": labels})
+    #print({**example, "input_ids": encoded_full_prompt_and_response, "labels": labels})
     return {**example, "input_ids": encoded_full_prompt_and_response, "labels": labels}
 
 

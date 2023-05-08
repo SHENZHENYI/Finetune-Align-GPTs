@@ -18,10 +18,10 @@ from lit_llama.tokenizer import Tokenizer
 from scripts.prepare_alpaca import generate_prompt
 
 llama_name = "7B"
-checkpoint_path = "../state_dict.pth"
+checkpoint_path = "./state_dict.pth"
 tokenizer_path = "../tokenizer.model"
 
-out_dir = "out/alpaca-lora-v2"
+out_dir = "out/alpaca-lora-gsm8k"
 eval_interval = 20
 save_interval = 20
 eval_iters = 100
@@ -30,11 +30,11 @@ log_interval = 1
 # Hyperparameters
 learning_rate = 3e-4
 batch_size = 128
-micro_batch_size = 4
+micro_batch_size = 2
 gradient_accumulation_steps = batch_size // micro_batch_size
 max_iters = 50000 * 3 // micro_batch_size
 weight_decay = 0.0
-block_size = 256
+block_size = 512
 lora_r = 8
 lora_alpha = 16
 lora_dropout = 0.05
@@ -42,14 +42,20 @@ warmup_steps = 100
 
 
 def main():
+    train_data, val_data = load_datasets([
+        "data/alpaca",
+        "data/GSM8K"
+    ])
+
+    print('train', len(train_data))
+    print('valid', len(val_data))
+
     fabric = L.Fabric(accelerator="cuda", devices=1, precision="bf16-mixed")
     fabric.launch()
     fabric.seed_everything(1337 + fabric.global_rank)
 
     if fabric.global_rank == 0:
         os.makedirs(out_dir, exist_ok=True)
-
-    train_data, val_data = load_datasets()
 
     config = LLaMAConfig.from_name(llama_name)
     config.block_size = block_size
@@ -118,7 +124,7 @@ def train(
 
         dt = time.time() - t0
         if iter_num % log_interval == 0:
-            fabric.print(f"iter {iter_num}: loss {loss.item():.4f}, time: {dt*1000:.2f}ms")
+            fabric.print(f"iter {iter_num}: loss {loss.item():.4f}, time: {dt*1000:.2f}ms, max-iter: {max_iters}")
 
 
 def generate_response(model, instruction):
@@ -133,7 +139,7 @@ def generate_response(model, instruction):
         model,
         tokens=encoded,
         max_length=block_size,
-        max_new_tokens=128,
+        max_new_tokens=256,
     )
     output = tokenizer.decode(output[0].cpu())
     return output # output.split("### Response:")[1].strip()
@@ -195,16 +201,15 @@ def get_batch(fabric: L.Fabric, data: list):
     return x, y
 
 
-def load_datasets(data_dirs: list[str]):
+def load_datasets(data_dirs):
     """load a multiple datasets"""
     train_data_list, val_data_list = [], []
     for data_dir in data_dirs:
         train_data = torch.load(os.path.join(data_dir, "train.pt"))
         val_data = torch.load(os.path.join(data_dir, "test.pt"))
-        train_data_list.append(train_data)
-        val_data_list.append(val_data)
-    train_data_list = torch.stack(train_data_list)
-    val_data_list = torch.stack(val_data_list)
+        train_data_list.extend(train_data)
+        val_data_list.extend(val_data)
+
     return train_data_list, val_data_list
 
 
